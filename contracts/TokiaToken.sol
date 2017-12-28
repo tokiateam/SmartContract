@@ -417,7 +417,7 @@ contract TokiaToken is StandardToken, Owned {
 
         /// round determined by conjunction of both time and total sold tokens
         while(roundNum < 4 && totalSupply > roundCaps[roundNum]) {
-            //roundNum++;
+            roundNum++;
         }
     }
 
