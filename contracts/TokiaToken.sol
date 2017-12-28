@@ -241,7 +241,7 @@ contract Owned {
 
 contract TokiaToken is StandardToken, Owned {
     string public constant name = "TokiaToken";
-    string public constant symbol = "TOK";
+    string public constant symbol = "TKA";
     uint8 public constant decimals = 18;
 
     /// Maximum tokens to be allocated.
@@ -250,8 +250,8 @@ contract TokiaToken is StandardToken, Owned {
     /// Maximum tokens to be allocated on the sale (75% of the hard cap)
     uint256 public constant TOKENS_SALE_HARD_CAP = 50000000 * 10**uint256(decimals);
 
-    /// Base exchange rate is set to 1 ETH = 500 TOK.
-    uint256 public constant BASE_RATE = 500;
+    /// Base exchange rate is set to 1 ETH = 714 TKA.
+    uint256 public constant BASE_RATE = 714;
 
     /// seconds since 01.01.1970 to 04.12.2017 (both 00:00:00 o'clock UTC)
     /// presale start time
@@ -275,15 +275,15 @@ contract TokiaToken is StandardToken, Owned {
     /// team tokens are locked until this date (01.01.2019)
     uint64 private constant date01Jan2019 = 1546300800;
 
+    /// token trading opening time (01.05.2018)
+    uint64 private constant date01May2018 = 1525219199;
+
     /// no tokens can be ever issued when this is set to "true"
     bool public tokenSaleClosed = false;
-    
-    /// token trading opening time (01.05.2017)
-    uint64 private constant date01May2018 = 1525132800;
 
     /// contract to be called to release the Tokia team tokens
     address public timelockContractAddress;
-   
+
     /// Issue event index starting from 0.
     uint64 public issueIndex = 0;
 
@@ -291,12 +291,20 @@ contract TokiaToken is StandardToken, Owned {
     event Issue(uint64 issueIndex, address addr, uint256 tokenAmount);
 
     modifier inProgress {
-        require(totalSupply < TOKENS_SALE_HARD_CAP && !tokenSaleClosed);
+        require(totalSupply < TOKENS_SALE_HARD_CAP
+            && !tokenSaleClosed);
         _;
     }
 
+    /// Allow the closing to happen only once
     modifier beforeEnd {
         require(!tokenSaleClosed);
+        _;
+    }
+
+    /// Require that the end of the sale has passed (time is 01 May 2018 or later)
+    modifier tradingOpen {
+        require(uint64(block.timestamp) > date01May2018);
         _;
     }
 
@@ -308,34 +316,37 @@ contract TokiaToken is StandardToken, Owned {
     function () public payable {
         purchaseTokens(msg.sender);
     }
-    
+
     /// @dev Issue token based on Ether received.
-    /// @param recipient Address that newly issued token will be sent to.
-    function purchaseTokens(address recipient) public payable inProgress {
-        // We only accept minimum purchase of 0.01 ETH.
+    /// @param _beneficiary Address that newly issued token will be sent to.
+    function purchaseTokens(address _beneficiary) public payable inProgress {
+        // only accept a minimum amount of ETH?
         require(msg.value >= 0.01 ether);
 
         uint256 tokens = computeTokenAmount(msg.value);
-        doIssueTokens(recipient, tokens);
+        doIssueTokens(_beneficiary, tokens);
+
+        /// forward the raised funds to the contract creator
+        owner.transfer(this.balance);
     }
 
     /// @dev Batch issue tokens on the presale
-    /// @param _addresses addresses that the presale tokens will be sent to
-    /// @param _addresses the amounts of tokens, with decimals expanded (full)
+    /// @param _addresses addresses that the presale tokens will be sent to.
+    /// @param _addresses the amounts of tokens, with decimals expanded (full).
     function issueTokensMulti(address[] _addresses, uint256[] _tokens) public onlyOwner inProgress {
         require(_addresses.length == _tokens.length);
-        require(_addresses.length <= 125);
+        require(_addresses.length <= 100);
 
         for (uint256 i = 0; i < _tokens.length; i = i.add(1)) {
-            doIssueTokens(_addresses[i], _tokens[i]);
+            doIssueTokens(_addresses[i], _tokens[i].mul(10**uint256(decimals)));
         }
     }
-    
+
     /// @dev Issue tokens for a single buyer on the presale
     /// @param _beneficiary addresses that the presale tokens will be sent to.
     /// @param _tokens the amount of tokens, with decimals expanded (full).
     function issueTokens(address _beneficiary, uint256 _tokens) public onlyOwner inProgress {
-        doIssueTokens(_beneficiary, _tokens);
+        doIssueTokens(_beneficiary, _tokens.mul(10**uint256(decimals)));
     }
 
     /// @dev issue tokens for a single buyer
@@ -349,39 +360,38 @@ contract TokiaToken is StandardToken, Owned {
         // roll back if hard cap reached
         require(increasedTotalSupply <= TOKENS_SALE_HARD_CAP);
 
-        //increase token total supply
+        // increase token total supply
         totalSupply = increasedTotalSupply;
-        //update the investors balance to number of tokens sent
+        // update the beneficiary balance to number of tokens sent
         balances[_beneficiary] = balances[_beneficiary].add(_tokens);
-  
+
+        // event is fired when tokens issued
         Issue(
             issueIndex++,
             _beneficiary,
             _tokens
         );
     }
-    
+
     /// @dev Returns the current price.
     function price() public view returns (uint256 tokens) {
         return computeTokenAmount(1 ether);
     }
 
-    /// @dev Compute the amount of TOK token that can be purchased.
-    /// @param ethAmount Amount of Ether to purchase TOK.
-    /// @return Amount of TOK token to purchase
+    /// @dev Compute the amount of TKA token that can be purchased.
+    /// @param ethAmount Amount of Ether to purchase TKA.
+    /// @return Amount of TKA token to purchase
     function computeTokenAmount(uint256 ethAmount) internal view returns (uint256 tokens) {
         uint256 tokenBase = ethAmount.mul(BASE_RATE);
         uint8[5] memory roundDiscountPercentages = [47, 35, 25, 15, 5];
-        
+
         uint8 roundDiscountPercentage = roundDiscountPercentages[currentRoundIndex()];
         uint8 amountDiscountPercentage = getAmountDiscountPercentage(tokenBase);
 
-        uint256 tokenBonus = tokenBase.mul(roundDiscountPercentage + amountDiscountPercentage).div(100);
-
-        tokens = tokenBase.add(tokenBonus);
+        tokens = tokenBase.mul(100).div(100 - (roundDiscountPercentage + amountDiscountPercentage));
     }
-    
-    /// @dev Compute the additional discount for the purchaed amount of TOK
+
+    /// @dev Compute the additional discount for the purchaed amount of TKA
     /// @param tokenBase the base tokens amount computed only against the base rate
     /// @return integer representing the percentage discount
     function getAmountDiscountPercentage(uint256 tokenBase) internal pure returns (uint8) {
@@ -390,25 +400,12 @@ contract TokiaToken is StandardToken, Owned {
         if(tokenBase >= 500 * 10**uint256(decimals)) return 3;
         return 0;
     }
-    
+
     /// @dev Determine the current sale round
     /// @return integer representing the index of the current sale round
     function currentRoundIndex() internal view returns (uint8 roundNum) {
-        uint64 _now = uint64(block.timestamp);
-        require(_now <= date15Mar2018);
+        roundNum = currentRoundIndexByDate();
 
-        if(_now >= date04Dec2017 && _now < date01Jan2018) {
-            roundNum = 0;
-        } else if(_now < date01Feb2018) {
-            roundNum = 1;
-        } else if(_now < date15Feb2018) {
-            roundNum = 2;
-        } else if(_now < date01Mar2018) {
-            roundNum = 3;
-        } else {
-            roundNum = 4;
-        }
-        
         /// token caps for each round
         uint256[5] memory roundCaps = [
             10000000 * 10**uint256(decimals),
@@ -417,13 +414,27 @@ contract TokiaToken is StandardToken, Owned {
             40000000 * 10**uint256(decimals), // + round 3
             50000000 * 10**uint256(decimals)  // + round 4
         ];
-        
+
         /// round determined by conjunction of both time and total sold tokens
         while(roundNum < 4 && totalSupply > roundCaps[roundNum]) {
-            roundNum++;
+            //roundNum++;
         }
     }
-    
+
+    /// @dev Determine the current sale tier.
+    /// @return the index of the current sale tier by date.
+    function currentRoundIndexByDate() internal view returns (uint8 roundNum) {
+        uint64 _now = uint64(block.timestamp);
+        require(_now <= date15Mar2018);
+
+        roundNum = 0;
+        if(_now > date01Mar2018) roundNum = 4;
+        if(_now > date15Feb2018) roundNum = 3;
+        if(_now > date01Feb2018) roundNum = 2;
+        if(_now > date01Jan2018) roundNum = 1;
+        return roundNum;
+    }
+
     /// @dev Closes the sale, issues the team tokens and burns the unsold
     function close() public onlyOwner beforeEnd {
         /// team tokens are equal to 25% of the sold tokens
@@ -454,15 +465,13 @@ contract TokiaToken is StandardToken, Owned {
         owner.transfer(this.balance);
     }
 
-    /// @dev Trading limited - requires 01 May 2017 to have passed
-    function transferFrom(address _from, address _to, uint256 _value) public returns (bool) {
-        if(date01May2018 > uint64(block.timestamp)) return false;
+    /// Transfer limited by the tradingOpen modifier (time is 01 May 2018 or later)
+    function transferFrom(address _from, address _to, uint256 _value) public tradingOpen returns (bool) {
         return super.transferFrom(_from, _to, _value);
     }
 
-    /// @dev Trading limited - requires 01 May 2017 to have passed
-    function transfer(address _to, uint256 _value) public returns (bool) {
-        if(date01May2018 > uint64(block.timestamp)) return false;
+    /// Transfer limited by the tradingOpen modifier (time is 01 May 2018 or later)
+    function transfer(address _to, uint256 _value) public tradingOpen returns (bool) {
         return super.transfer(_to, _value);
     }
 }
